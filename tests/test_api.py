@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from text2speech import main
 from text2speech.config import get_settings
 from text2speech.main import app
 from text2speech.providers import register_provider_type, reset_cache
@@ -470,3 +473,96 @@ class TestChunkedSynthesis:
         # it must be chunked, not rejected.
         assert res.status_code == 200
         assert res.json()["chunks"] >= 2
+
+
+TEARDOWN_MESSAGE = (
+    "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)"
+)
+
+
+class TestDeadConnectionNoiseFilter:
+    """Windows prints a scary traceback when the browser drops a connection."""
+
+    @staticmethod
+    def _teardown_context(exc: BaseException) -> dict:
+        return {"message": TEARDOWN_MESSAGE, "exception": exc, "handle": object()}
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            ConnectionResetError(10054, "远程主机强迫关闭了一个现有的连接"),
+            ConnectionAbortedError(10053, "软件导致连接中止"),
+            OSError(10057, "由于套接字没有连接"),
+            BrokenPipeError(),
+        ],
+    )
+    def test_socket_teardown_errors_are_filtered(self, exc):
+        assert main.is_dead_connection_noise(self._teardown_context(exc)) is True
+
+    def test_errors_from_other_callbacks_are_not_filtered(self):
+        context = {
+            "message": "Exception in callback something_else()",
+            "exception": ConnectionResetError(10054, "reset"),
+        }
+        assert main.is_dead_connection_noise(context) is False
+
+    def test_non_oserror_from_teardown_is_not_filtered(self):
+        assert main.is_dead_connection_noise(self._teardown_context(ValueError("boom"))) is False
+
+    def test_context_without_message_is_not_filtered(self):
+        assert main.is_dead_connection_noise({"exception": ConnectionResetError()}) is False
+
+    def test_handler_swallows_noise_and_forwards_the_rest(self):
+        loop = asyncio.new_event_loop()
+        try:
+            forwarded: list[dict] = []
+            loop.set_exception_handler(lambda _loop, context: forwarded.append(context))
+            main.install_dead_connection_filter(loop)
+            handler = loop.get_exception_handler()
+
+            handler(loop, self._teardown_context(ConnectionResetError(10054, "reset")))
+            assert forwarded == []
+
+            real = {
+                "message": "Exception in callback something_else()",
+                "exception": ValueError("boom"),
+            }
+            handler(loop, real)
+            assert forwarded == [real]
+        finally:
+            loop.close()
+
+    def test_default_handler_is_used_when_no_previous_handler(self):
+        loop = asyncio.new_event_loop()
+        try:
+            main.install_dead_connection_filter(loop)
+            handler = loop.get_exception_handler()
+            seen: list[dict] = []
+            loop.default_exception_handler = lambda context: seen.append(context)  # type: ignore[method-assign]
+
+            handler(loop, self._teardown_context(ConnectionResetError(10054, "reset")))
+            assert seen == []
+
+            handler(loop, {"message": "Exception in callback something_else()", "exception": ValueError("boom")})
+            assert len(seen) == 1
+        finally:
+            loop.close()
+
+    def test_lifespan_installs_the_filter_and_restores_it_afterwards(self, caplog, monkeypatch, tmp_path):
+        monkeypatch.setenv("T2S_OUTPUTS_DIR", str(tmp_path / "out"))
+        get_settings.cache_clear()
+
+        async def scenario() -> object:
+            async with main.lifespan(app):
+                loop = asyncio.get_running_loop()
+                handler = loop.get_exception_handler()
+                assert handler is not None
+                with caplog.at_level(logging.ERROR, logger="asyncio"):
+                    handler(loop, self._teardown_context(ConnectionResetError(10054, "reset")))
+                assert TEARDOWN_MESSAGE not in caplog.text
+            return loop.get_exception_handler()
+
+        try:
+            assert asyncio.run(scenario()) is None
+        finally:
+            get_settings.cache_clear()

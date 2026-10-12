@@ -273,7 +273,7 @@ tests/                          # pytest 测试套件
 
 ```bash
 uv sync --dev        # 或：uv sync（已包含 dev 组）
-uv run pytest        # 144 个单元/集成测试
+uv run pytest        # 154 个单元/集成测试
 uv run python -m scripts.smoke_test   # 针对运行中的实例（见上文）
 ```
 
@@ -287,3 +287,24 @@ uv run python -m scripts.smoke_test   # 针对运行中的实例（见上文）
 上游客户端遵循 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`。某些环境的 `NO_PROXY` 中含有
 IPv6 地址（如 `[::1]`），会导致 `httpx.Client()` 解析时报错；此时客户端会自动回退到
 `trust_env=False`，保证合成功能不受影响。
+
+### Windows 服务器日志里无害的报错
+
+在 Windows 上，`uv run text2speech` 的控制台偶尔会出现这样的输出：
+
+```
+Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+Traceback (most recent call last):
+  ...
+ConnectionResetError: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
+```
+
+**这不是网络问题，也不影响语音生成。** 报错来自 CPython 的 asyncio，而不是 TTS 提供商：
+浏览器主动断开它自己发起的连接时（中止 `<audio>` 请求、关闭标签页、回收 keep-alive 连接），
+asyncio 仍会在这个已经被重置的 socket 上调用 `socket.shutdown()`，而此时响应其实早已完整
+返回。CPython 没有对这次调用做保护（[cpython#149388](https://github.com/python/cpython/issues/149388)），
+于是默认处理器就为一次"客户端主动关闭的连接"打印了完整堆栈。
+
+本服务会安装一个事件循环异常处理器，只吞掉这个拆除回调里的 socket 错误，日志因此
+保持干净；其他所有事件循环错误仍会正常上报。

@@ -288,7 +288,7 @@ tests/                          # pytest suite
 
 ```bash
 uv sync --dev        # or: uv sync (dev group is included)
-uv run pytest        # 144 unit/integration tests
+uv run pytest        # 154 unit/integration tests
 uv run python -m scripts.smoke_test   # against a running instance (see above)
 ```
 
@@ -305,3 +305,27 @@ The upstream client honors `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`. Some environme
 list IPv6 addresses in `NO_PROXY` (e.g. `[::1]`), which makes `httpx.Client()` raise
 while parsing them; in that case the client automatically falls back to
 `trust_env=False` so synthesis keeps working.
+
+### Harmless tracebacks in the Windows server log
+
+On Windows you may occasionally see this in the `uv run text2speech` console:
+
+```
+Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+Traceback (most recent call last):
+  ...
+ConnectionResetError: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
+```
+
+**Your network is fine and the audio is unaffected.** The message comes from
+CPython's asyncio, not from the TTS provider: when the browser drops a connection it
+opened itself — an aborted `<audio>` request, a closed tab, a recycled keep-alive
+socket — asyncio still calls `socket.shutdown()` on that already-reset socket *after*
+the response was fully served. CPython does not guard that call
+([cpython#149388](https://github.com/python/cpython/issues/149388)), so the default
+handler prints a full traceback for a connection the client closed on purpose.
+
+The app installs a loop exception handler that swallows only this teardown
+callback's socket errors, so the log stays clean; every other event-loop error is
+still reported normally.

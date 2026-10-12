@@ -9,7 +9,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, AsyncIterator
+from typing import Annotated, AsyncIterator, Callable
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -37,12 +37,64 @@ AUDIO_MEDIA_TYPES = {
 }
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
+# ---------------------------------------------------------------------------
+# Windows asyncio log-noise filter
+# ---------------------------------------------------------------------------
+
+# asyncio's proactor transport tears a socket down in a deferred callback. When the
+# browser has already dropped the connection (it aborts an <audio> range request,
+# closes the tab, or recycles a keep-alive socket) the socket arrives reset, so
+# ``socket.shutdown()`` inside that callback raises ConnectionResetError
+# [WinError 10054] *after* the response was fully served. CPython does not guard
+# that call, so asyncio's default handler prints a full traceback for a connection
+# that was closed on purpose by the client (see CPython issue #149388).
+_TEARDOWN_CALLBACK_NAMES = ("_ProactorBasePipeTransport._call_connection_lost",)
+
+
+def is_dead_connection_noise(context: dict) -> bool:
+    """True for asyncio's harmless "connection forcibly closed" teardown errors.
+
+    Only errors raised *by that specific teardown callback* are filtered: the
+    protocol has already been told the connection is lost by then, so the socket
+    state carries no actionable information. Every other callback error still
+    reaches the default handler.
+    """
+    message = context.get("message") or ""
+    if not any(
+        f"Exception in callback {name}" in message for name in _TEARDOWN_CALLBACK_NAMES
+    ):
+        return False
+    return isinstance(context.get("exception"), OSError)
+
+
+def install_dead_connection_filter(
+    loop: asyncio.AbstractEventLoop,
+) -> Callable | None:
+    """Silence teardown noise on ``loop``; returns the previous handler."""
+    previous = loop.get_exception_handler()
+
+    def handler(active_loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        if is_dead_connection_noise(context):
+            return
+        if previous is not None:
+            previous(active_loop, context)
+        else:
+            active_loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+    return previous
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
     settings.outputs_dir.mkdir(parents=True, exist_ok=True)
-    yield
+    loop = asyncio.get_running_loop()
+    previous_handler = install_dead_connection_filter(loop)
+    try:
+        yield
+    finally:
+        loop.set_exception_handler(previous_handler)
 
 
 app = FastAPI(
