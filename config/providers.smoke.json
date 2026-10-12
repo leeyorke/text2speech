@@ -1,0 +1,36 @@
+{
+  "providers": [
+    {
+      "id": "mock",
+      "name": "Mock TTS (local)",
+      "type": "openai-compatible",
+      "base_url": "http://127.0.0.1:9111/api/v1",
+      "api_key_env": "MOCK_TTS_API_KEY",
+      "models": ["mock-wav-model"],
+      "default_model": "mock-wav-model",
+      "voices": ["beep"]
+    },
+    {
+      "id": "mock-slow",
+      "name": "Mock TTS (slow, 3s)",
+      "type": "openai-compatible",
+      "base_url": "http://127.0.0.1:9111/api/v1",
+      "api_key_env": "MOCK_TTS_API_KEY",
+      "models": ["mock-wav-model"],
+      "default_model": "mock-wav-model",
+      "extra_body": {"delay": 3}
+    },
+    {
+      "id": "google-mock",
+      "name": "Google Gemini (mock)",
+      "type": "google",
+      "base_url": "http://127.0.0.1:9111",
+      "api_key_env": "MOCK_TTS_API_KEY",
+      "models": ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"],
+      "default_model": "gemini-3.8-flash-tts",
+      "default_voice": "Kore",
+      "voices": ["Kore", "Puck", "Charon", "Zephyr"],
+      "style": "cheerful and friendly"
+    }
+  ]
+}

@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>text2speech</title>
+<style>
+  :root {
+    --bg: #0f1220;
+    --panel: #191d33;
+    --panel-2: #222842;
+    --border: #2e365a;
+    --text: #e8ebf5;
+    --muted: #9aa3c0;
+    --accent: #6c8cff;
+    --accent-2: #8f6cff;
+    --error: #ff6b81;
+    --ok: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #1c2140 0%, var(--bg) 60%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 20px 60px; }
+  header h1 { margin: 0; font-size: 26px; letter-spacing: .3px; }
+  header h1 span { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  header p { margin: 6px 0 22px; color: var(--muted); font-size: 14px; }
+  .panel {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  textarea, input[type=text], input[type=number], select {
+    width: 100%;
+    background: #12162a;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  textarea { min-height: 170px; resize: vertical; line-height: 1.5; }
+  textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 14px; }
+  .drop {
+    border: 1.5px dashed var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .drop.hover { border-color: var(--accent); background: rgba(108,140,255,.08); }
+  .drop strong { color: var(--text); }
+  .checks { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin: 4px 0 14px; font-size: 13px; color: var(--muted); }
+  .checks label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+  button {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border: 0; color: white; font-weight: 600; font-size: 15px;
+    padding: 11px 26px; border-radius: 10px; cursor: pointer;
+    transition: transform .05s, opacity .15s;
+  }
+  button:hover { opacity: .92; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #status { margin-left: 12px; font-size: 13px; color: var(--muted); }
+  .error { color: var(--error); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+  .hidden { display: none !important; }
+  audio { width: 100%; margin-top: 12px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+  .meta b { color: var(--text); font-weight: 600; }
+  a { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; background: rgba(108,140,255,.15); color: var(--accent); }
+  .pill.warn { background: rgba(255,107,129,.15); color: var(--error); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .progress { margin-top: 14px; }
+  .progress .bar { height: 8px; border-radius: 999px; background: #12162a; border: 1px solid var(--border); overflow: hidden; }
+  .progress .bar > div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .3s ease; }
+  .progress .label { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .chunks { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { display: inline-block; min-width: 28px; text-align: center; padding: 2px 7px; border-radius: 6px; background: #12162a; border: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  .chip.running { color: var(--accent); border-color: var(--accent); }
+  .chip.done { color: var(--ok); border-color: rgba(74,222,128,.45); }
+  .chip.failed { color: var(--error); border-color: rgba(255,107,129,.45); }
+  .del { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 8px; border-radius: 6px; }
+  .del:hover { color: var(--error); background: rgba(255,107,129,.12); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>text<span>2</span>speech</h1>
+    <p>Paste text or drop a .txt / .md file, pick a provider, and generate speech.</p>
+  </header>
+
+  <div class="panel">
+    <div class="row">
+      <div>
+        <label for="provider">Provider</label>
+        <select id="provider"></select>
+        <div class="hint" id="providerHint"></div>
+      </div>
+      <div>
+        <label for="model">Model</label>
+        <input type="text" id="model" list="modelList" placeholder="provider default" />
+        <datalist id="modelList"></datalist>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="voice">Voice (optional)</label>
+        <input type="text" id="voice" list="voiceList" placeholder="provider default" />
+        <datalist id="voiceList"></datalist>
+      </div>
+      <div>
+        <label for="format">Audio format</label>
+        <select id="format">
+          <option value="mp3">mp3</option>
+          <option value="wav">wav</option>
+          <option value="opus">opus</option>
+          <option value="aac">aac</option>
+          <option value="flac">flac</option>
+          <option value="pcm">pcm</option>
+        </select>
+      </div>
+      <div>
+        <label for="speed">Speed (optional)</label>
+        <input type="number" id="speed" min="0.25" max="4" step="0.25" placeholder="1.0" />
+      </div>
+    </div>
+
+    <div class="checks">
+      <label><input type="checkbox" id="includeCode" /> Read code blocks aloud (markdown)</label>
+      <span id="charCount"></span>
+    </div>
+
+    <label for="text">Text</label>
+    <textarea id="text" placeholder="Type or paste text here, or drop a file below…"></textarea>
+    <div class="drop" id="drop">
+      <input type="file" id="file" accept=".txt,.md,.markdown,text/plain,text/markdown" class="hidden" />
+      Drop a <strong>.txt</strong> or <strong>.md</strong> file here, or click to browse
+      <div class="hint" id="fileName"></div>
+    </div>
+
+    <div style="margin-top:16px; display:flex; align-items:center;">
+      <button id="generate">Generate speech</button>
+      <span id="status"></span>
+    </div>
+    <div class="progress hidden" id="progress">
+      <div class="bar"><div id="progressFill"></div></div>
+      <div class="label" id="progressLabel"></div>
+      <div class="chunks" id="chunkList"></div>
+    </div>
+    <div class="error hidden" id="error"></div>
+  </div>
+
+  <div class="panel hidden" id="resultPanel">
+    <label>Result</label>
+    <audio id="player" controls></audio>
+    <div class="meta" id="resultMeta"></div>
+    <div style="margin-top:10px"><a id="download" download>Download audio</a></div>
+  </div>
+
+  <div class="panel">
+    <label>Recent outputs</label>
+    <div id="outputs"><div class="hint">Loading…</div></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let providers = [];
+let pendingFile = null;
+let chunkChars = 0; // 0 = unknown (chunking disabled / not loaded yet)
+
+async function loadProviders() {
+  const res = await fetch('/api/providers');
+  providers = await res.json();
+  const sel = $('provider');
+  sel.innerHTML = '';
+  if (!providers.length) {
+    sel.innerHTML = '<option value="">— no providers configured —</option>';
+    $('providerHint').textContent = 'Add providers in ~/.text2speech/config.json';
+    return;
+  }
+  for (const p of providers) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name + (p.has_api_key ? '' : ' (no API key)');
+    sel.appendChild(opt);
+  }
+  syncProvider();
+}
+
+function syncProvider() {
+  const p = providers.find(x => x.id === $('provider').value);
+  if (!p) return;
+  const modelList = $('modelList');
+  modelList.innerHTML = '';
+  for (const m of p.models) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    modelList.appendChild(opt);
+  }
+  $('model').placeholder = p.default_model || 'model id';
+  $('voice').placeholder = p.default_voice ? `provider default (${p.default_voice})` : 'provider default';
+  const voiceList = $('voiceList');
+  voiceList.innerHTML = '';
+  for (const v of p.voices) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    voiceList.appendChild(opt);
+  }
+  $('providerHint').textContent = p.has_api_key
+    ? `${p.type} · ${p.base_url}`
+    : `Missing env var ${p.api_key_env || '(api key)'} — requests will fail until it is set.`;
+  // Restrict the format dropdown to what this provider can actually produce.
+  const supported = p.supported_formats; // null = anything
+  const formatSel = $('format');
+  let firstEnabled = null;
+  for (const opt of formatSel.options) {
+    const ok = !supported || supported.includes(opt.value);
+    opt.disabled = !ok;
+    if (ok && !firstEnabled) firstEnabled = opt;
+  }
+  if (formatSel.selectedOptions[0] && formatSel.selectedOptions[0].disabled && firstEnabled) {
+    formatSel.value = firstEnabled.value;
+  }
+}
+
+function updateCharCount() {
+  const n = $('text').value.length;
+  let label = n ? `${n.toLocaleString()} characters` : '';
+  if (chunkChars && n > chunkChars) {
+    const estimate = Math.ceil(n / chunkChars);
+    label += ` · ≈ ${estimate} chunk${estimate > 1 ? 's' : ''}`;
+  }
+  $('charCount').textContent = label;
+}
+
+async function loadSettings() {
+  try {
+    const health = await (await fetch('/api/health')).json();
+    chunkChars = health.chunk_chars || 0;
+  } catch { chunkChars = 0; }
+  updateCharCount();
+}
+
+async function loadOutputs() {
+  const res = await fetch('/api/outputs');
+  const files = await res.json();
+  const box = $('outputs');
+  if (!files.length) { box.innerHTML = '<div class="hint">No audio generated yet.</div>'; return; }
+  let html = '<table><tr><th>File</th><th>Size</th><th>When</th><th></th><th></th></tr>';
+  for (const f of files) {
+    const when = new Date(f.modified_at * 1000).toLocaleString();
+    html += `<tr><td>${f.filename}</td><td>${(f.size_bytes/1024).toFixed(1)} KB</td><td>${when}</td>
+      <td><audio controls preload="none" src="${f.url}" style="height:32px"></audio></td>
+      <td><button class="del" data-file="${f.filename}" title="Delete">&#10005;</button></td></tr>`;
+  }
+  box.innerHTML = html + '</table>';
+  box.querySelectorAll('.del').forEach(btn => {
+    btn.addEventListener('click', () => deleteOutput(btn.dataset.file));
+  });
+}
+
+async function deleteOutput(filename) {
+  if (!confirm(`Delete ${filename}? This cannot be undone.`)) return;
+  const res = await fetch('/api/outputs/' + encodeURIComponent(filename), { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    showError(data.detail || `Delete failed (HTTP ${res.status})`);
+    return;
+  }
+  clearError();
+  loadOutputs();
+}
+
+function showProgress(pct, message) {
+  $('progress').classList.remove('hidden');
+  $('progressFill').style.width = pct + '%';
+  $('progressLabel').textContent = message;
+}
+
+function hideProgress() { $('progress').classList.add('hidden'); }
+
+function renderChunkList(total) {
+  const box = $('chunkList');
+  box.innerHTML = '';
+  for (let i = 1; i <= total; i++) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.id = 'chip-' + i;
+    chip.textContent = i;
+    chip.title = `Chunk ${i}`;
+    box.appendChild(chip);
+  }
+}
+
+function markChunk(index, state) {
+  const chip = $('chip-' + index);
+  if (!chip) return;
+  chip.className = 'chip ' + state;
+  chip.textContent = (state === 'done' ? '✓' : state === 'failed' ? '✗' : state === 'running' ? '⏳' : '') + index;
+}
+
+function clearChunkList() { $('chunkList').innerHTML = ''; }
+
+function showError(msg) {
+  const el = $('error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function clearError() { $('error').classList.add('hidden'); }
+
+$('provider').addEventListener('change', syncProvider);
+$('text').addEventListener('input', updateCharCount);
+
+$('drop').addEventListener('click', () => $('file').click());
+$('drop').addEventListener('dragover', (e) => { e.preventDefault(); $('drop').classList.add('hover'); });
+$('drop').addEventListener('dragleave', () => $('drop').classList.remove('hover'));
+$('drop').addEventListener('drop', (e) => {
+  e.preventDefault();
+  $('drop').classList.remove('hover');
+  if (e.dataTransfer.files.length) acceptFile(e.dataTransfer.files[0]);
+});
+$('file').addEventListener('change', () => { if ($('file').files.length) acceptFile($('file').files[0]); });
+
+function acceptFile(file) {
+  const ok = /\.(txt|md|markdown)$/i.test(file.name);
+  if (!ok) { showError(`Unsupported file "${file.name}". Use .txt, .md or .markdown.`); return; }
+  clearError();
+  pendingFile = file;
+  $('fileName').textContent = `${file.name} · ${(file.size/1024).toFixed(1)} KB`;
+  const reader = new FileReader();
+  reader.onload = () => { $('text').value = reader.result; updateCharCount(); };
+  reader.readAsText(file);
+}
+
+$('generate').addEventListener('click', async () => {
+  clearError();
+  const btn = $('generate');
+  btn.disabled = true;
+  $('status').textContent = '';
+  clearChunkList();
+  showProgress(5, 'Preparing…');
+  try {
+    const form = new FormData();
+    form.append('provider_id', $('provider').value);
+    form.append('text', $('text').value);
+    if (pendingFile) form.append('file', pendingFile);
+    form.append('model', $('model').value);
+    form.append('voice', $('voice').value);
+    form.append('response_format', $('format').value);
+    if ($('speed').value) form.append('speed', $('speed').value);
+    form.append('include_code_blocks', $('includeCode').checked ? 'true' : 'false');
+
+    const res = await fetch('/api/tts/stream', { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let job = null;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const line = raw.split('\n').find(l => l.startsWith('data:'));
+        if (!line) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(5).trim()); } catch { continue; }
+
+        if (evt.stage === 'error') {
+          throw new Error(evt.message || 'Generation failed');
+        }
+        if (evt.stage === 'chunk_plan') {
+          renderChunkList(evt.chunks || 0);
+          showProgress(evt.progress || 0, evt.message);
+        } else if (evt.stage === 'chunk_start') {
+          markChunk(evt.chunk, 'running');
+          showProgress(evt.progress || 0, evt.message);
+        } else if (evt.stage === 'chunk_done') {
+          markChunk(evt.chunk, 'done');
+          showProgress(evt.progress || 0, evt.message);
+        } else if (evt.stage === 'chunk_failed') {
+          markChunk(evt.chunk, 'failed');
+          showProgress(evt.progress || 0, evt.message);
+        } else if (evt.stage === 'done') {
+          job = evt.job;
+          showProgress(100, evt.message || 'Done');
+        } else if (evt.message) {
+          showProgress(evt.progress || 0, evt.message);
+        }
+      }
+    }
+
+    if (!job) throw new Error('Stream ended without a result');
+
+    $('player').src = job.url;
+    $('download').href = job.url;
+    $('resultPanel').classList.remove('hidden');
+    $('resultMeta').innerHTML =
+      `<span class="pill">${job.provider_name}</span>
+       ${job.chunked ? `<span class="pill">${job.chunks} chunks merged</span>` : ''}
+       <span>model <b>${job.model}</b></span>
+       <span>format <b>${job.format}</b></span>
+       <span><b>${job.characters.toLocaleString()}</b> characters</span>
+       <span>source <b>${job.source_name}</b> (${job.kind})</span>
+       ${job.generation_id ? `<span>generation id <b>${job.generation_id}</b></span>` : ''}`;
+    $('status').textContent = 'Done.';
+    loadOutputs();
+  } catch (err) {
+    showError(String(err.message || err));
+    $('status').textContent = '';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+loadProviders();
+loadOutputs();
+loadSettings();
+updateCharCount();
+</script>
+</body>
+</html>
